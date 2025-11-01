@@ -1,0 +1,8 @@
+[package]
+name = "umwtool"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gtk = "0.18.2"
+tray-item = { version = "0.10.0", features = ["libappindicator"] }
