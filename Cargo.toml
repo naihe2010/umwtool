@@ -1,8 +1,33 @@
 [package]
 name = "umwtool"
 version = "0.1.0"
+license = "GPLv3"
+description = "Unmap window tool"
 edition = "2021"
+
+[[bin]]
+name = "umwtool"
+path = "src/main.rs"
 
 [dependencies]
 gtk = "0.18.2"
 tray-item = { version = "0.10.0", features = ["libappindicator"] }
+x11rb = "0.13.2"
+
+[package.metadata.deb]
+maintainer = "Alf <naihe2010@126.com>"
+#section = "utils"
+#priority = "optional"
+depends = []
+assets = [
+["target/release/umwtool", "usr/bin/umwtool", "755"],
+["icons/umwtool.png", "usr/share/icons/umwtool.png", "644"]
+]
+
+[package.metadata.generate-rpm]
+assets = [
+{source = "target/release/umwtool", dest = "/usr/bin/umwtool", mode = "755"},
+{source = "icons/umwtool.png", dest = "/usr/share/icons/hicolor/48x48/apps/umwtool.png", mode = "644"}
+]
+
+[package.metadata.generate-rpm.requires]

@@ -1,132 +1,82 @@
-use std::process::Command;
+use std::error::Error;
 use std::thread;
 use std::time::Duration;
-use std::error::Error;
+
 use tray_item::{IconSource, TrayItem};
-use gtk;
+use x11rb::connection::Connection;
+use x11rb::protocol::xproto::*;
+use x11rb::rust_connection::RustConnection;
 
-const KNOWN_WIDTHS: [&str; 5] = ["640", "476", "560", "320", "232"];
+const KNOWN_WIDTHS: [u32; 5] = [640, 476, 560, 320, 232];
 
-fn kill_shadow() -> Result<(), Box<dyn Error>> {
-    
-    let process_output = Command::new("sh")
-        .arg("-c")
-        .arg("ps -ef | grep WXWork.exe")
-        .output()?;
+fn main() -> Result<(), Box<dyn Error>> {
+    gtk::init()?;
+    println!("Starting WXWork shadow-window killer …");
 
-    let process_list = String::from_utf8_lossy(&process_output.stdout);
-    
-    if process_list.lines().count() <= 1 {
-        return Ok(());
-    }
+    let mut tray = TrayItem::new("WXWork Killer", IconSource::Resource("uwmtool"))?;
+    tray.add_menu_item("Quit", || std::process::exit(0))?;
 
-    if let Err(e) = check_windows_with_wmctrl() {
-        eprintln!("Error checking wmctrl: {}", e);
-    }
+    thread::spawn(move || loop {
+        if let Err(e) = kill_shadow() {
+            eprintln!("kill_shadow error: {}", e);
+        }
+        thread::sleep(Duration::from_secs(1));
+    });
 
-    if let Err(e) = check_windows_with_xwininfo() {
-        eprintln!("Error checking xwininfo: {}", e);
-    }
-
+    gtk::main();
     Ok(())
 }
 
-fn check_windows_with_wmctrl() -> Result<(), Box<dyn Error>> {
-    let output = Command::new("wmctrl")
-        .args(["-l", "-G", "-p", "-x"])
-        .output()?;
-    
-    let output_str = String::from_utf8_lossy(&output.stdout);
+fn kill_shadow() -> Result<(), Box<dyn Error>> {
+    let (conn, screen_num) = RustConnection::connect(None)?;
+    let screen = &conn.setup().roots[screen_num];
 
-    for line in output_str.lines() {
-        if !line.contains("wxwork.exe.wxwork.exe") {
+    let tree = conn.query_tree(screen.root)?.reply()?;
+    for &win in &tree.children {
+        let attrs = conn.get_window_attributes(win)?.reply()?;
+        if attrs.map_state != MapState::VIEWABLE {
             continue;
         }
 
-        let parts: Vec<&str> = line.split_whitespace().collect();
+        let (cls, _wm_name) = window_class_and_name(&conn, win)?;
+        if !cls.contains("wxwork.exe") {
+            continue;
+        }
 
-        if let (Some(window_id), Some(width_str)) = (parts.get(0), parts.get(5)) {
-            
-            if KNOWN_WIDTHS.contains(width_str) {
-                continue;
-            }
+        let geo = conn.get_geometry(win)?.reply()?;
+        let (w, h) = (geo.width as u32, geo.height as u32);
 
-            if parts.len() == 9 {
-                unmap_window(window_id)?;
-            }
+        if KNOWN_WIDTHS.contains(&w) {
+            continue;
+        }
+        if h > 20 && h < 100 && w as f64 / h as f64 > 30.0 {
+            println!("unmapping shadow window {:x} ({}x{})", win, w, h);
+            conn.unmap_window(win)?;
+            conn.flush()?;
         }
     }
     Ok(())
 }
 
-fn check_windows_with_xwininfo() -> Result<(), Box<dyn Error>> {
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(r#"xwininfo -root -tree | grep wxwork.exe | grep "has no name""#)
-        .output()?;
+fn window_class_and_name(
+    conn: &RustConnection,
+    win: Window,
+) -> Result<(String, String), Box<dyn Error>> {
+    let cls_atom = conn.intern_atom(false, b"WM_CLASS")?.reply()?.atom;
+    let name_atom = conn.intern_atom(false, b"WM_NAME")?.reply()?.atom;
 
-    let output_str = String::from_utf8_lossy(&output.stdout);
-
-    for line in output_str.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-
-        if let (Some(window_id), Some(geo_str)) = (parts.get(0), parts.get(6)) {
-            
-            if let Some(dim_str) = geo_str.split('+').next() {
-                let dims: Vec<&str> = dim_str.split('x').collect();
-                
-                if dims.len() == 2 {
-                    if let (Ok(width), Ok(height)) = (dims[0].parse::<f64>(), dims[1].parse::<f64>()) {
-                        
-                        if height < 100.0 && height > 20.0 && (width / height) > 30.0 {
-                            unmap_window(window_id)?;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
+    let cls = get_text_property(conn, win, cls_atom)?;
+    let name = get_text_property(conn, win, name_atom)?;
+    Ok((cls, name))
 }
 
-fn unmap_window(window_id: &str) -> Result<(), Box<dyn Error>> {
-    let xwininfo_output = Command::new("xwininfo")
-        .args(["-id", window_id])
-        .output()?;
-
-    let output_str = String::from_utf8_lossy(&xwininfo_output.stdout);
-
-    if output_str.contains("IsUnMapped") {
-        return Ok(());
-    }
-
-    println!("Unmapping window: {}", window_id);
-    Command::new("xdotool")
-        .args(["windowunmap", window_id])
-        .status()?;
-    Ok(())
-}
-
-
-fn main() {
-    gtk::init().unwrap();
-    println!("Starting WXWork shadow window killer...");
-
-    let mut tray = TrayItem::new("WXWork Killer", IconSource::Resource("icon")).unwrap();
-
-    tray.add_menu_item("Quit", || {
-        println!("Quitting WXWork shadow window killer.");
-        std::process::exit(0);
-    }).unwrap();
-
-    thread::spawn(|| {
-        loop {
-            if let Err(e) = kill_shadow() {
-                eprintln!("An error occurred during shadow kill: {}", e);
-            }
-            thread::sleep(Duration::from_secs(1));
-        }
-    });
-
-    gtk::main()
+fn get_text_property(
+    conn: &RustConnection,
+    win: Window,
+    prop: Atom,
+) -> Result<String, Box<dyn Error>> {
+    let reply = conn
+        .get_property(false, win, prop, AtomEnum::STRING, 0, 1024)?
+        .reply()?;
+    Ok(String::from_utf8_lossy(&reply.value).trim().to_string())
 }
