@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     gtk::init()?;
     println!("Starting WXWork shadow-window killer …");
 
-    let mut tray = TrayItem::new("WXWork Killer", IconSource::Resource("uwmtool"))?;
+    let mut tray = TrayItem::new("WXWork Killer", IconSource::Resource("umwtool"))?;
     tray.add_menu_item("Quit", || std::process::exit(0))?;
 
     thread::spawn(move || loop {
