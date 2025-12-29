@@ -10,6 +10,7 @@ name = "umwtool"
 path = "src/main.rs"
 
 [dependencies]
+glib = "0.18.5"
 gtk = "0.18.2"
 tray-item = { version = "0.10.0", features = ["libappindicator"] }
 x11rb = "0.13.2"
