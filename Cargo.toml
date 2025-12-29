@@ -1,6 +1,6 @@
 [package]
 name = "umwtool"
-version = "0.1.0"
+version = "0.2"
 license = "GPLv3"
 description = "Unmap window tool"
 edition = "2021"
